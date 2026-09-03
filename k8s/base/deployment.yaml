@@ -13,12 +13,17 @@ spec:
     metadata:
       labels:
         app: candidate-api
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
     spec:
       containers:
         - name: candidate-api
           image: ghcr.io/udaysingh007/sre-take-home:1.0.0
           ports:
-            - containerPort: 8080
+            - name: http
+              containerPort: 8080
           envFrom:
             - configMapRef:
                 name: candidate-api-env

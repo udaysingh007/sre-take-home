@@ -2,8 +2,11 @@ using CandidateApi.Configuration;
 using CandidateApi.Contracts;
 using CandidateApi.Services;
 using Microsoft.Extensions.Options;
+using Prometheus;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Logging.AddJsonConsole();
 
 builder.Services
     .AddOptions<CandidateApiOptions>()
@@ -14,6 +17,8 @@ builder.Services
 builder.Services.AddSingleton<ReadinessEvaluator>();
 
 var app = builder.Build();
+
+app.UseHttpMetrics();
 
 app.MapGet("/", (IOptions<CandidateApiOptions> options, IWebHostEnvironment environment) =>
 {
@@ -52,5 +57,7 @@ app.MapGet("/api/work-items", (IOptions<CandidateApiOptions> options) =>
 
     return Results.Ok(items);
 });
+
+app.MapMetrics();
 
 app.Run();
