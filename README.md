@@ -47,4 +47,50 @@ I believe this submission covers the core SRE assessment requirements, along wit
 - **Security posture**: HTTP by design for simplicity; credentials shared via email — would be hardened in a corporate environment
 - **Assessment coverage**: core SRE + Observability/SLOs + Incident Response + IaC (via [iac-for-coterie](https://github.com/udaysingh007/iac-for-coterie))
 
+## Screenshots
+
+### Architecture
+![Architecture Diagram](docs/images/architectural-diag.png)
+
+### Landing Page
+![Landing Page](docs/images/landing-page.png)
+
+---
+
+<details>
+<summary><strong>TEST Environment Endpoints</strong></summary>
+
+#### /test — Service Metadata
+![Test Root](docs/images/test-root.png)
+
+#### /test/health/live — Liveness
+![Test Health Live](docs/images/test-health-live.png)
+
+#### /test/health/ready — Readiness
+![Test Health Ready](docs/images/test-health-ready.png)
+
+#### /test/api/work-items — Work Items
+![Test API Work Items](docs/images/test-api-work-items.png)
+
+</details>
+
+---
+
+<details>
+<summary><strong>DEV Environment Endpoints</strong></summary>
+
+#### /dev — Service Metadata
+![Dev Root](docs/images/dev-root.png)
+
+#### /dev/health/live — Liveness
+![Dev Health Live](docs/images/dev-health-live.png)
+
+#### /dev/health/ready — Readiness
+![Dev Health Ready](docs/images/dev-health-ready.png)
+
+#### /dev/api/work-items — Work Items
+![Dev API Work Items](docs/images/dev-api-work-items.png)
+
+</details>
+
 ---
