@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: test
+
+resources:
+  - ../../base
+  - ingress.yaml
+  - middleware.yaml
+
+configMapGenerator:
+  - name: candidate-api-env
+    literals:
+      - ASPNETCORE_ENVIRONMENT=Test
+
+images:
+  - name: ghcr.io/udaysingh007/sre-take-home
+    newTag: "1.0.0"

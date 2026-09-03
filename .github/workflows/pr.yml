@@ -1,0 +1,41 @@
+name: PR — Build & Test
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    name: Build, Test & Package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore dependencies
+        run: dotnet restore SreTakeHome.sln
+
+      - name: Build
+        run: dotnet build SreTakeHome.sln --no-restore -c Release
+
+      - name: Run unit tests
+        run: dotnet test SreTakeHome.sln --no-build -c Release --verbosity normal
+
+      - name: Pack NuGet (CandidateApi.Contracts)
+        run: |
+          VERSION=$(cat VERSION | tr -d '[:space:]')
+          dotnet pack src/CandidateApi.Contracts/CandidateApi.Contracts.csproj \
+            -c Release --no-build -o ./nupkg /p:PackageVersion=${VERSION}
+
+      - name: Upload NuGet artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-package
+          path: ./nupkg/*.nupkg
+
+      - name: Build Docker image (validation only)
+        run: docker build -t candidate-api:pr-${{ github.event.pull_request.number }} .

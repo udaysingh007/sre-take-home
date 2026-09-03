@@ -1,0 +1,196 @@
+name: Deploy — Build & Promote
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build-test-publish:
+    name: Build, Test & Publish
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Determine version
+        id: version
+        run: |
+          VERSION=$(cat VERSION | tr -d '[:space:]')
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Building version: ${VERSION}"
+
+      - name: Restore dependencies
+        run: dotnet restore SreTakeHome.sln
+
+      - name: Build
+        run: dotnet build SreTakeHome.sln --no-restore -c Release
+
+      - name: Run unit tests
+        run: dotnet test SreTakeHome.sln --no-build -c Release --verbosity normal
+
+      - name: Pack NuGet (CandidateApi.Contracts)
+        run: |
+          dotnet pack src/CandidateApi.Contracts/CandidateApi.Contracts.csproj \
+            -c Release --no-build -o ./nupkg \
+            /p:PackageVersion=${{ steps.version.outputs.version }}
+
+      - name: Upload NuGet artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-package
+          path: ./nupkg/*.nupkg
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          build-args: VERSION=${{ steps.version.outputs.version }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
+  deploy-dev:
+    name: Deploy to Dev
+    needs: build-test-publish
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update dev image tag
+        run: |
+          cd k8s/overlays/dev
+          sed -i 's/newTag: .*/newTag: "${{ needs.build-test-publish.outputs.version }}"/' kustomization.yaml
+          cat kustomization.yaml
+
+      - name: Commit manifest update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add k8s/overlays/dev/kustomization.yaml
+          git diff --staged --quiet && echo "No changes to commit" || \
+            git commit -m "$(cat <<'EOF'
+          chore: update dev image tag to ${{ needs.build-test-publish.outputs.version }}
+
+          [skip ci]
+          EOF
+          )"
+          git push
+
+      - name: Wait for ArgoCD sync
+        run: sleep 30
+
+      - name: Health check dev deployment
+        run: |
+          echo "Checking dev deployment health..."
+          for i in $(seq 1 12); do
+            STATUS=$(curl -sf http://${{ vars.VM_PUBLIC_IP }}/dev/health/ready 2>/dev/null | jq -r '.status // empty' 2>/dev/null || true)
+            if [ "$STATUS" = "Healthy" ]; then
+              echo "Dev deployment is healthy!"
+              curl -sf http://${{ vars.VM_PUBLIC_IP }}/dev/ | jq .
+              exit 0
+            fi
+            echo "Attempt $i/12: status='$STATUS', retrying in 10s..."
+            sleep 10
+          done
+          echo "Dev deployment health check failed after 2 minutes"
+          exit 1
+
+  deploy-test:
+    name: Promote to Test
+    needs: [build-test-publish, deploy-dev]
+    runs-on: ubuntu-latest
+    environment: test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull latest (includes dev manifest update)
+        run: git pull origin main
+
+      - name: Update test image tag
+        run: |
+          cd k8s/overlays/test
+          sed -i 's/newTag: .*/newTag: "${{ needs.build-test-publish.outputs.version }}"/' kustomization.yaml
+          cat kustomization.yaml
+
+      - name: Commit manifest update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add k8s/overlays/test/kustomization.yaml
+          git diff --staged --quiet && echo "No changes to commit" || \
+            git commit -m "$(cat <<'EOF'
+          chore: promote ${{ needs.build-test-publish.outputs.version }} to test
+
+          [skip ci]
+          EOF
+          )"
+          git push
+
+      - name: Wait for ArgoCD sync
+        run: sleep 30
+
+      - name: Health check test deployment
+        run: |
+          echo "Checking test deployment health..."
+          for i in $(seq 1 12); do
+            STATUS=$(curl -sf http://${{ vars.VM_PUBLIC_IP }}/test/health/ready 2>/dev/null | jq -r '.status // empty' 2>/dev/null || true)
+            if [ "$STATUS" = "Healthy" ]; then
+              echo "Test deployment is healthy!"
+              curl -sf http://${{ vars.VM_PUBLIC_IP }}/test/ | jq .
+              exit 0
+            fi
+            echo "Attempt $i/12: status='$STATUS', retrying in 10s..."
+            sleep 10
+          done
+          echo "Test deployment health check failed after 2 minutes"
+          exit 1
+
+      - name: Bump VERSION for next release
+        run: |
+          VERSION=$(cat VERSION | tr -d '[:space:]')
+          IFS='.' read -r major minor patch <<< "$VERSION"
+          NEXT_VERSION="$major.$((minor + 1)).$patch"
+          echo "$NEXT_VERSION" > VERSION
+          git add VERSION
+          git commit -m "$(cat <<'EOF'
+          chore: bump version to $NEXT_VERSION for next release
+
+          [skip ci]
+          EOF
+          )"
+          git push
