@@ -1,145 +1,50 @@
 # SRE Take-Home Assessment
 
-## Instructions
+## How to Run and Access the Demo
 
-Fork this repository and follow the guidelines below. When you are finished, or when you have run out of time, share a link to your forked repository back with the hiring team for review.
+### Getting Oriented
 
-- **Mid-Level SRE candidates**: Complete the base assignment below. Try to spend **4 hours or less**.
-- **Senior SRE candidates**: Complete the base assignment **and** pick 2 items from the [Senior SRE Extension](#senior-sre-extension). Try to spend **6 hours or less**.
+1. Visit the landing page at `http://13.216.126.57/` for a bird's-eye view of all API endpoints, observability tools (Grafana, ArgoCD), and infrastructure links.
 
-This exercise is intentionally open-ended. We care about how you approach the work, how you communicate tradeoffs, and how you shape a delivery pipeline around a realistic application.
+### Happy Path — Deploying a New Version
 
-## The Assignment
+2. Create a PR that changes `trigger-demo.txt` in the repo root (the content doesn't matter — this file exists solely to trigger the pipeline without touching application code).
+3. Merge the PR to `main`. This triggers the GitHub Actions deploy workflow.
+4. The workflow builds the .NET solution, runs tests, pushes the image to GHCR, deploys to `dev`, runs a smoke test, validates via ArgoCD, and then promotes to `test`.
+5. Once the workflow completes successfully (unless the demo gods are angry), click the DEV and TEST endpoint links on the landing page — you should see the version number bumped up.
 
-As an SRE at Coterie, you will often need to stand up CI/CD pipelines for application teams shipping .NET services. A common scenario is a .NET API that needs to be built, tested, containerized, packaged, and deployed to Kubernetes by GitHub Actions.
+### Unhappy Path — Incident Response & Automated Rollback
 
-This repository contains a .NET 10 solution with:
+6. To simulate a bad deployment, uncomment the chaos/fault-injection lines (29–31) in `src/CandidateApi/Program.cs`, commit, and merge to `main`.
+7. The deploy will succeed normally — the API works fine for the first 5 minutes after startup.
+8. After 5 minutes, the `/api/work-items` endpoint begins returning 500 errors, which the synthetic monitor detects.
+9. Prometheus SLO recording rules detect the availability drop, and Grafana fires an alert — sending an email notification and triggering the runbook-controller.
+10. Visit the runbook approval page (linked from the landing page under "Alert Approvals") to review the pending rollback.
+11. Once you approve, the runbook-controller reverts the `dev` Kustomize manifest to the last stable image tag via the GitHub Contents API, and ArgoCD automatically rolls back the deployment.
+12. The API recovers without any manual kubectl intervention — the entire remediation flows through Git.
 
-- A Web API project at `src/CandidateApi`
-- A contracts library at `src/CandidateApi.Contracts` that should be packaged as a NuGet package
-- A unit test project at `tests/CandidateApi.Tests`
+## Solution Summary
 
-The API is intentionally simple so you can focus on delivery and operations work instead of application development. It includes:
+All actions are triggered when a developer merges a PR to the `main` branch. The GitHub Actions workflow clones the repo, builds the .NET solution, runs unit tests, pushes the container image to GHCR, and publishes the `CandidateApi.Contracts` NuGet package as a build artifact. It then updates the Kustomize image tag in the `dev` overlay manifest, runs a smoke test against the dev endpoint, and validates a healthy sync via ArgoCD before promoting to `test` by updating its manifest in the same way. A `VERSION` file in the `main` branch tracks the current release version and is bumped directly (not via PR) to avoid recursive workflow triggers.
 
-- `GET /` for service metadata
-- `GET /health/live` for liveness
-- `GET /health/ready` for readiness based on configured dependencies
-- `GET /api/work-items` for sample application data
+ArgoCD, running on the K3s cluster, detects the manifest changes in this repo and automatically deploys the updated image to the corresponding Kubernetes namespace (`dev` or `test`). Prometheus scrapes metrics from the API pods, and Grafana provides dashboards, SLO tracking, and alerting on top of those metrics. A synthetic monitor pod continuously hits the API endpoints to generate realistic traffic patterns for response time and request rate metrics.
 
-## What You Should Build
+When a deployment goes bad — for example, response times degrade beyond the SLO threshold — Grafana fires an alert and sends an email notification. The alert also triggers a dedicated runbook-controller pod running in the cluster, which requires human-in-the-loop approval before executing remediation. Once approved, the runbook-controller uses the GitHub Contents API to revert the `dev` overlay manifest back to the last known stable image tag, and ArgoCD picks up the rollback automatically.
 
-Create two GitHub Actions workflows:
+All API endpoints across both environments (`/dev/`, `/dev/health/live`, `/dev/health/ready`, `/dev/api/work-items`, and the same under `/test/`) are exposed via Traefik ingress routes on the K3s cluster. Access is over HTTP by design — TLS/certificate management is not the focus of this assessment and would add unnecessary complexity. Admin credentials for Grafana and ArgoCD are shared via email; there is nothing sensitive on this infrastructure, though in a corporate environment this would obviously be hardened.
 
-1. When a developer opens or updates a pull request, trigger a build of the solution and run unit tests.
-2. When changes are merged into the `main` branch, trigger a build and deploy to a development environment. If development succeeds, automatically promote the same build to a test environment.
+I believe this submission covers the core SRE assessment requirements, along with the senior extensions: **Observability & SLOs** (Prometheus + Grafana dashboards + SLO burn-rate alerting), **Incident Response** (automated runbook with human approval for rollback), and **Infrastructure as Code** (AWS infra provisioned via Terraform in the companion [iac-for-coterie](https://github.com/udaysingh007/iac-for-coterie) repo). I aimed to spend around 6 hours but ended up closer to 8–9 hours given the breadth of what needed to come together. Given the time constraints, there may be rough edges, but the solution should serve as a reasonable demonstration of my abilities in this space. I leveraged AI tooling during development, and even with that assistance, getting all these pieces integrated and working within that timeframe was a significant undertaking. Happy to address any questions or discuss the decisions made along the way.
 
-Your target deployment platform should be a Kubernetes cluster or clusters.
+## TL;DR
 
-## Requirements
-
-- A build is triggered from a pull request
-- A build and deployment are triggered from a push to `main`
-- A Dockerfile is created that containerizes the .NET API and is built in CI
-- A NuGet package is produced from `CandidateApi.Contracts` as part of the build
-- Two environments are configured: development and test
-- The .NET API is deployed to both environments
-- The deployment approach is documented clearly enough for a reviewer to follow
-
-## Local Development
-
-The repo is pinned to .NET 10 through `global.json`.
-
-Typical commands:
-
-```bash
-dotnet restore
-dotnet build SreTakeHome.sln
-dotnet test SreTakeHome.sln
-dotnet run --project src/CandidateApi/CandidateApi.csproj --urls http://localhost:5000
-```
-
-Once the API is running, useful endpoints are:
-
-- `http://localhost:5000/`
-- `http://localhost:5000/health/live`
-- `http://localhost:5000/health/ready`
-- `http://localhost:5000/api/work-items`
-
-If you want to simulate a failing readiness check, update the dependency values under `CandidateApi` in `src/CandidateApi/appsettings.json` or use environment-specific configuration.
-
-## Expectations
-
-There are a lot of moving parts here: .NET builds, unit tests, Docker images, NuGet packaging, GitHub Actions workflows, environment promotion, and Kubernetes deployments. A 100% complete solution is welcome, but not required.
-
-If you do not have access to infrastructure needed to fully deploy the service, it is okay to mock pieces of the solution. You can use placeholder manifests, commented workflow steps, or documented assumptions. If you want a fully working deployment target, feel free to use a free or trial environment such as Microsoft Azure or another provider.
-
-During the technical interview, you will be expected to walk through your submission. At a minimum, you should have the application running and accessible locally so you can demonstrate it live.
-
-We value:
-
-- Clear automation and repeatability
-- Practical tradeoff decisions
-- Thoughtful documentation
-- Sensible security and secret handling
-- Observability and deployment safety considerations
-
-## What To Submit
-
-Please include:
-
-- Your GitHub Actions workflow files
-- Any Docker or Kubernetes manifests you created
-- Notes about assumptions, tradeoffs, or incomplete pieces
-- Instructions a reviewer can use to validate your solution
+- **CI/CD flow**: PR merge to main triggers build, test, GHCR push, NuGet artifact, dev deploy, smoke test, ArgoCD validation, then test promotion
+- **Version management**: VERSION file bumped directly on main to avoid recursive workflow triggers
+- **GitOps delivery**: ArgoCD detects manifest changes in this repo and auto-deploys to the K3s cluster
+- **Observability**: Prometheus + Grafana dashboards + SLO burn-rate alerting
+- **Synthetic monitoring**: dedicated pod generating realistic traffic and metrics against API endpoints
+- **Incident response**: Grafana alert → email + runbook-controller → human approval → GitHub API manifest revert → ArgoCD auto-rollback
+- **Ingress**: Traefik routes for all API endpoints across dev and test namespaces
+- **Security posture**: HTTP by design for simplicity; credentials shared via email — would be hardened in a corporate environment
+- **Assessment coverage**: core SRE + Observability/SLOs + Incident Response + IaC (via [iac-for-coterie](https://github.com/udaysingh007/iac-for-coterie))
 
 ---
-
-## Senior SRE Extension
-
-If you are interviewing for a **Senior Site Reliability Engineer** role, please complete the base assignment above **and** 2 additional items from below. These extensions reflect the deeper ownership, observability expertise, and infrastructure maturity we expect from senior engineers on the team.
-
-You are not expected to complete every item. Pick 2 areas where you can demonstrate the most depth and explain your reasoning for what you prioritized.
-
-### Observability & SLOs
-
-- Instrument the API with meaningful metrics (request latency, error rates, saturation) and define at least one **SLI/SLO** for the service. Document the SLO target, the error budget, and how you would alert on budget burn rate.
-- Provide a Grafana dashboard definition (JSON model or provisioning config) that visualizes the SLIs you defined. If you don't have a running Grafana instance, a checked-in dashboard JSON with documentation is fine.
-- Configure structured logging and demonstrate how logs would be aggregated (e.g., Loki, Application Insights, or equivalent).
-
-### Infrastructure as Code
-
-- Define the infrastructure needed to run the service using an IaC tool (Pulumi, Terraform, Bicep, or similar). This should cover at minimum the Kubernetes cluster, container registry, and any supporting resources (networking, DNS, secrets management).
-- Structure the IaC so that development and test environments are provisioned from the same modules with environment-specific configuration. Show how you would manage state and prevent drift.
-
-### Advanced Kubernetes & Deployment Strategy
-
-- Implement a deployment strategy beyond basic rolling updates (e.g., blue-green, canary with automated rollback). Document the tradeoffs of your chosen approach.
-- Add production-hardening to your Kubernetes manifests: resource requests/limits, pod disruption budgets, network policies, security contexts (non-root, read-only filesystem), and horizontal pod autoscaling.
-- Configure health check integration so that Kubernetes liveness and readiness probes use the API's `/health/live` and `/health/ready` endpoints with appropriate thresholds.
-
-### Incident Response & Operational Readiness
-
-- Write a **runbook** for at least one failure scenario (e.g., the readiness check fails, deployment rollback is needed, or a dependent service is degraded). Include detection, diagnosis steps, and remediation.
-- Describe or implement an alerting strategy: what conditions fire alerts, severity levels, escalation paths, and how you would reduce alert fatigue.
-
-### CI/CD Maturity
-
-- Add security scanning to the pipeline (container image scanning, dependency vulnerability checks, or static analysis).
-- Implement pipeline optimizations such as build caching, parallel jobs, or conditional step execution.
-- Show how secrets and environment-specific configuration are managed across environments without hardcoding values in workflows or manifests.
-
-### Senior-Level Expectations
-
-In addition to the base assessment criteria, senior candidates will be evaluated on:
-
-- **Systems thinking**: Do your choices account for failure modes, scalability, and operational burden?
-- **Depth of reasoning**: Can you articulate *why* you chose an approach over alternatives?
-- **Production readiness**: Would your solution survive a real incident with minimal manual intervention?
-- **Observability maturity**: Do your metrics, logs, and alerts tell a coherent story about service health?
-- **Mentorship signal**: Is your documentation clear enough that a junior engineer could follow it and learn from it?
-
----
-
-## Questions
-
-Feel free to reach out with questions or concerns regarding the assessment. This is a free-form exercise on purpose, and there are multiple reasonable ways to approach it.
