@@ -15,4 +15,4 @@ configMapGenerator:
 
 images:
   - name: ghcr.io/udaysingh007/sre-take-home
-    newTag: "1.0.0"
+    newTag: "1.1.0"
