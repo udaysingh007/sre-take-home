@@ -23,7 +23,7 @@ spec:
             - |
               echo "Synthetic monitor started — hitting /dev/api/work-items"
               while true; do
-                CODE=$(curl -sf -o /dev/null -w "%{http_code}" http://13.216.126.57/dev/api/work-items 2>/dev/null || echo "000")
+                CODE=$(curl -s -o /dev/null -w "%{http_code}" http://13.216.126.57/dev/api/work-items)
                 echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') status=$CODE"
                 DELAY=$(awk 'BEGIN{srand(); print int(rand()*10)+1}')
                 sleep "$DELAY"
