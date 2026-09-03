@@ -22,8 +22,8 @@ RUN dotnet publish src/CandidateApi/CandidateApi.csproj \
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 
-RUN groupadd --system appgroup && useradd --system --no-create-home --gid appgroup appuser
-USER appuser
+RUN groupadd --system --gid 1001 appgroup && useradd --system --no-create-home --uid 1001 --gid appgroup appuser
+USER 1001
 
 COPY --from=build /app/publish .
 
