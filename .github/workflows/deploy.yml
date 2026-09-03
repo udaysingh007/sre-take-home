@@ -187,7 +187,7 @@ jobs:
           NEXT_VERSION="$major.$((minor + 1)).$patch"
           echo "$NEXT_VERSION" > VERSION
           git add VERSION
-          git commit -m "$(cat <<'EOF'
+          git commit -m "$(cat <<EOF
           chore: bump version to $NEXT_VERSION for next release
 
           [skip ci]

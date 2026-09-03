@@ -1,0 +1,10 @@
+.git
+.github
+.gitignore
+docs
+k8s
+README.md
+VERSION
+**/.vs
+**/bin
+**/obj

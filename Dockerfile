@@ -22,7 +22,7 @@ RUN dotnet publish src/CandidateApi/CandidateApi.csproj \
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 
-RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
+RUN groupadd --system appgroup && useradd --system --no-create-home --gid appgroup appuser
 USER appuser
 
 COPY --from=build /app/publish .
