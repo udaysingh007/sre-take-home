@@ -19,4 +19,5 @@ public sealed record ServiceMetadataResponse(
     string Environment,
     string Region,
     string Version,
-    DateTimeOffset TimeUtc);
+    DateTimeOffset TimeUtc,
+    string Message);

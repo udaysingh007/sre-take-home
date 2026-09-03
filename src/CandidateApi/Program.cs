@@ -20,6 +20,18 @@ var app = builder.Build();
 
 app.UseHttpMetrics();
 
+// -----------------------------------------------------------------------
+// Chaos / fault-injection (for incident-response demo)
+// Uncomment the two lines below to enable.  After CHAOS_DELAY_MINUTES
+// (default 5) the /api/work-items endpoint will start returning 500s,
+// which burns the availability error budget and fires SLO alerts.
+// -----------------------------------------------------------------------
+// var chaosStart = DateTime.UtcNow.AddMinutes(
+//     int.TryParse(Environment.GetEnvironmentVariable("CHAOS_DELAY_MINUTES"), out var d) ? d : 5);
+// var chaosEnabled = true;
+var chaosStart = DateTime.MaxValue;
+var chaosEnabled = false;
+
 app.MapGet("/", (IOptions<CandidateApiOptions> options, IWebHostEnvironment environment) =>
 {
     var response = new ServiceMetadataResponse(
@@ -27,7 +39,8 @@ app.MapGet("/", (IOptions<CandidateApiOptions> options, IWebHostEnvironment envi
         environment.EnvironmentName,
         options.Value.Region,
         typeof(Program).Assembly.GetName().Version?.ToString() ?? "unknown",
-        DateTimeOffset.UtcNow);
+        DateTimeOffset.UtcNow,
+        "Stable release — all systems operational");
 
     return Results.Ok(response);
 });
@@ -46,6 +59,10 @@ app.MapGet(
 
 app.MapGet("/api/work-items", (IOptions<CandidateApiOptions> options) =>
 {
+    // Chaos: return 500 after the delay elapses (when enabled)
+    if (chaosEnabled && DateTime.UtcNow >= chaosStart)
+        return Results.StatusCode(500);
+
     var items = options.Value.WorkItems
         .Select(item => new WorkItemResponse(
             item.Id,
