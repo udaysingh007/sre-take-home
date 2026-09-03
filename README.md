@@ -1,5 +1,28 @@
 # SRE Take-Home Assessment
 
+## How to Run and Access the Demo
+
+### Getting Oriented
+
+1. Visit the landing page at `http://13.216.126.57/` for a bird's-eye view of all API endpoints, observability tools (Grafana, ArgoCD), and infrastructure links.
+
+### Happy Path — Deploying a New Version
+
+2. Create a PR that changes `trigger-demo.txt` in the repo root (the content doesn't matter — this file exists solely to trigger the pipeline without touching application code).
+3. Merge the PR to `main`. This triggers the GitHub Actions deploy workflow.
+4. The workflow builds the .NET solution, runs tests, pushes the image to GHCR, deploys to `dev`, runs a smoke test, validates via ArgoCD, and then promotes to `test`.
+5. Once the workflow completes successfully (unless the demo gods are angry), click the DEV and TEST endpoint links on the landing page — you should see the version number bumped up.
+
+### Unhappy Path — Incident Response & Automated Rollback
+
+6. To simulate a bad deployment, uncomment the chaos/fault-injection lines (29–31) in `src/CandidateApi/Program.cs`, commit, and merge to `main`.
+7. The deploy will succeed normally — the API works fine for the first 5 minutes after startup.
+8. After 5 minutes, the `/api/work-items` endpoint begins returning 500 errors, which the synthetic monitor detects.
+9. Prometheus SLO recording rules detect the availability drop, and Grafana fires an alert — sending an email notification and triggering the runbook-controller.
+10. Visit the runbook approval page (linked from the landing page under "Alert Approvals") to review the pending rollback.
+11. Once you approve, the runbook-controller reverts the `dev` Kustomize manifest to the last stable image tag via the GitHub Contents API, and ArgoCD automatically rolls back the deployment.
+12. The API recovers without any manual kubectl intervention — the entire remediation flows through Git.
+
 ## Solution Summary
 
 All actions are triggered when a developer merges a PR to the `main` branch. The GitHub Actions workflow clones the repo, builds the .NET solution, runs unit tests, pushes the container image to GHCR, and publishes the `CandidateApi.Contracts` NuGet package as a build artifact. It then updates the Kustomize image tag in the `dev` overlay manifest, runs a smoke test against the dev endpoint, and validates a healthy sync via ArgoCD before promoting to `test` by updating its manifest in the same way. A `VERSION` file in the `main` branch tracks the current release version and is bumped directly (not via PR) to avoid recursive workflow triggers.
