@@ -26,11 +26,11 @@ app.UseHttpMetrics();
 // (default 5) the /api/work-items endpoint will start returning 500s,
 // which burns the availability error budget and fires SLO alerts.
 // -----------------------------------------------------------------------
-// var chaosStart = DateTime.UtcNow.AddMinutes(
-//     int.TryParse(Environment.GetEnvironmentVariable("CHAOS_DELAY_MINUTES"), out var d) ? d : 5);
-// var chaosEnabled = true;
-var chaosStart = DateTime.MaxValue;
-var chaosEnabled = false;
+var chaosStart = DateTime.UtcNow.AddMinutes(
+    int.TryParse(Environment.GetEnvironmentVariable("CHAOS_DELAY_MINUTES"), out var d) ? d : 5);
+var chaosEnabled = true;
+// var chaosStart = DateTime.MaxValue;
+// var chaosEnabled = false;
 
 app.MapGet("/", (IOptions<CandidateApiOptions> options, IWebHostEnvironment environment) =>
 {
