@@ -127,9 +127,62 @@ jobs:
           echo "Dev deployment health check failed after 2 minutes"
           exit 1
 
+  deploy-uat:
+    name: Promote to UAT
+    needs: [build-test-publish, deploy-dev]
+    runs-on: ubuntu-latest
+    environment: uat
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull latest (includes dev manifest update)
+        run: git pull origin main
+
+      - name: Update test image tag
+        run: |
+          cd k8s/overlays/uat
+          sed -i 's/newTag: .*/newTag: "${{ needs.build-test-publish.outputs.version }}"/' kustomization.yaml
+          cat kustomization.yaml
+
+      - name: Commit manifest update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add k8s/overlays/test/kustomization.yaml
+          git diff --staged --quiet && echo "No changes to commit" || \
+            git commit -m "$(cat <<'EOF'
+          chore: promote ${{ needs.build-test-publish.outputs.version }} to test
+
+          [skip ci]
+          EOF
+          )"
+          git push
+
+      - name: Wait for ArgoCD sync
+        run: sleep 30
+
+      - name: Health check test deployment
+        run: |
+          echo "Checking test deployment health..."
+          for i in $(seq 1 12); do
+            STATUS=$(curl -sf http://${{ vars.VM_PUBLIC_IP }}/uat/health/ready 2>/dev/null | jq -r '.status // empty' 2>/dev/null || true)
+            if [ "$STATUS" = "Healthy" ]; then
+              echo "Test deployment is healthy!"
+              curl -sf http://${{ vars.VM_PUBLIC_IP }}/test/ | jq .
+              exit 0
+            fi
+            echo "Attempt $i/12: status='$STATUS', retrying in 10s..."
+            sleep 10
+          done
+          echo "UAT deployment health check failed after 2 minutes"
+          exit 1
+
   deploy-test:
     name: Promote to Test
-    needs: [build-test-publish, deploy-dev]
+    needs: [build-test-publish, deploy-dev, deploy-uat]
     runs-on: ubuntu-latest
     environment: test
     steps:
