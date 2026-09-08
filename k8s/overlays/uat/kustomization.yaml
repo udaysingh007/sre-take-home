@@ -11,7 +11,7 @@ resources:
 configMapGenerator:
   - name: candidate-api-env
     literals:
-      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_ENVIRONMENT=UAT
 
 images:
   - name: ghcr.io/udaysingh007/sre-take-home
